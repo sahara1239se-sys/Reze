@@ -1,1 +1,235 @@
+# NOVOLINE (Prism Softworks) — Full Feature Dump + Readable Structure
+# Source: https://gitlab.com/PrismSoftworks/novoline/-/raw/main/public/novoline.lua
+# Dumped & structured for analysis. Prints/warns removed where reachable.
+# Original is a single ~2.3 MB DarkLua-bundled minified file.
 
+================================================================================
+# FEATURE LIST (complete high-level surface)
+================================================================================
+
+## Core Client
+- Custom declarative UI framework (mount system, styles, corners, strokes, scale, icons)
+- Animated loading screen (ring + status stages + fade)
+- Persistent settings / config system (JSON under Novoline/)
+- Keybind system + command bar (prefix configurable)
+- Theme engine (Modern / Fluent / custom) + wallpaper + tint from music
+- Auto-execute on join / teleport queue
+- Unload / single-tab mode / navbar auto-hide
+- FAB (floating action button)
+- Toast / notification system
+- Boot sound + FX
+
+## Movement / Player
+- Fly / Superfly / Mobile Fly
+- Hat Fly
+- Freecam
+- Speed control / Jump power / Infinite Jump / No Jump CD
+- Noclip
+- Swim
+- Sit / Stationary Walk
+- Head Sit / Shoulder Sit variants
+- Pole stretch / limb tools
+- Click Fling / Touch Fling
+- Grab (hold-click)
+
+## Combat / Targeting
+- Aimbot
+- Reach
+- Hitbox helpers
+- Click-to-target selection
+- Silent / Trigger style surface
+
+## Visuals / ESP
+- Chams
+- Boxes
+- Tracers
+- Nametags / Name ESP
+- Skeleton / bone style
+- Radar
+- Skybox control
+- Hide nametags option
+
+## Reanimation / Character
+- Full Reanimate system
+- Animation player + bundles + UGC Emotes
+- Anim Spoofer
+- Head Track
+- Camera lean / look-around during animations
+- Spasm / custom animation tracks
+
+## Identity / Spoof / Chat
+- Name / Display name spoof
+- Verified badge spoof
+- Chat spam / filter / mute / protection
+- VC Bypasser / VC Booster
+- Adonis Bypasser
+- Anti-Kick / Anti-TP
+- Webhook / Discord logging hooks
+
+## Music Player (full multi-source)
+- Local MP3 / OGG / WAV library + file drop
+- Spotify (OAuth PKCE, full playback control, library, playlists, queue, currently playing)
+- SoundCloud (search + play)
+- Apple Music (helper script + state.json bridge)
+- Lyrics (synced + plain)
+- Cover art / vinyl UI effects / immersive tint
+- Playlists management
+- Queue
+
+## Utility / Misc
+- Server hop + server history
+- Friend groups / online friends
+- Script search (ScriptBlox / RoScripts)
+- FPS unlock / battery-aware FPS cap
+- Fake lag
+- Command list
+- Custom script loader
+- Spatial shield / spam guard
+- Haptic feedback
+
+## UI / System
+- Sidebar + tab system
+- Color picker + theme chips
+- Window placement / drag handles
+- Configs save / load
+- Auto-hide navbar / single tab mode
+
+================================================================================
+# MUSIC PLAYER — HOW IT WORKS
+================================================================================
+
+## Architecture
+
+The music system is a multi-source player that can switch between:
+
+1. Local files (mp3 / ogg / wav) — default `_nvL.musicSource = "mp3"`
+2. Spotify
+3. SoundCloud
+4. Apple Music
+
+A central UI (Music Island / Music Player panel) displays cover, title, artist, progress, play/pause, next/prev, queue, and lyrics. The active source drives the UI through a common interface (position, duration, playing state, artwork, queue).
+
+### Local (mp3)
+- Files dropped or placed under the executor’s Novoline folder.
+- Uses Roblox Sound instances for playback.
+- Library + playlists stored locally.
+- Source tab inside the player UI.
+
+### Spotify
+- Full OAuth 2.0 PKCE flow (no client secret needed in the client).
+- Redirect URI hardcoded: `http://127.0.0.1:8888/callback`
+- Scopes:
+  - user-read-playback-state
+  - user-modify-playback-state
+  - user-read-currently-playing
+  - user-library-read / modify
+  - playlist-read-private / collaborative
+  - user-read-recently-played
+- Tokens + config saved to `Novoline/spotify.json` (refresh token, clientId, user, etc.).
+- Uses `HttpService` for all Spotify Web API calls.
+- Implements its own SHA-256 + base64url for PKCE.
+- Polls currently-playing, controls play/pause/seek/next/prev, manages queue and liked songs.
+- Artwork fetched and shown in the UI.
+- When Spotify is active source, the player UI mirrors Spotify’s currently-playing + queue.
+
+### SoundCloud
+- Search + stream playback.
+- Integrated into the same player UI.
+- Switching source stops the previous source and announces “Playing from SoundCloud now.”
+
+### Apple Music
+- Requires an external helper script (shell + osascript / JavaScript) that the user runs on their machine.
+- Helper writes `state.json` and reads `cmd.txt`.
+- Client polls state and sends commands (play/pause/seek etc.).
+- Notify system tells user to start the helper if not running.
+- Same UI surface as the other sources.
+
+### Common UI Matching
+- Single Music Island / panel that shows:
+  - Cover art (with fade / vinyl sheen effects)
+  - Track title + artist
+  - Progress bar (TimePosition / duration abstraction)
+  - Play / Pause / Next / Prev
+  - Queue list
+  - Lyrics panel (synced lyrics preferred)
+- Source is abstracted: each backend (Spotify, SoundCloud, Apple, local) exposes a common “wrap” that makes the active track look like a Roblox Sound-like object (TimePosition, etc.) so the UI code stays identical regardless of source.
+- Immersive tint: when music is playing, the client can tint the whole UI with the dominant color from the cover (`_nv_setTint`).
+- Cover only shown when the Music tab is active (`showMusicCover`).
+
+### Persistence
+- Spotify tokens → `Novoline/spotify.json`
+- Local library / playlists → local files under Novoline/
+- Settings (`musicSource`, `musicSpotify`, `musicApple`, etc.) saved in the main config.
+
+================================================================================
+# READABLE STRUCTURE (core modules)
+================================================================================
+
+## 1. UI Framework
+
+local UI_STYLES = {
+    transparent = { BackgroundTransparency = 1, BorderSizePixel = 0 },
+    button = { BackgroundTransparency = 1, BorderSizePixel = 0, Text = "", AutoButtonColor = false },
+    icon = { BackgroundTransparency = 1, BorderSizePixel = 0, ScaleType = Enum.ScaleType.Fit }
+}
+
+local UI_SKIP = { ref=true, children=true, style=true, scale=true, stroke=true, corner=true, position=true, size=true, anchor=true, center=true, icon=true }
+
+-- copyBag, adorn, mountNode implement a declarative tree → Instance system
+-- _nvL.ui.mount(spec, parent, {refs=...})
+
+## 2. Loading Screen
+-- NV_LoadScreen ScreenGui
+-- Animated ring (sweep gradient) + status caption
+-- quintOut easing for fade in/out
+-- Hosted in gethui / CoreGui / PlayerGui + protect_gui
+-- Globals: _G._nv_ls, _nv_ls_status, _nv_ls_running, _nv_ls_setstage, _nv_ls_fade
+
+## 3. HTTP Layer
+-- pickRequest() → syn.request / http_request / request / fluxus / http
+-- mirrorsOf() expands GitHub raw → jsDelivr + raw mirrors
+-- _nvL._nvHttpGet(urls, opts) with retries + body validation
+
+## 4. Spotify Module (key surface)
+SPOTIFY_REDIRECT = "http://127.0.0.1:8888/callback"
+SCOPES = "user-read-playback-state user-modify-playback-state ..."
+
+SP = {
+    file = "Novoline/spotify.json",
+    cfg = {}, st = {}, art = {}, queueList = {},
+    redirect = SPOTIFY_REDIRECT,
+    dashboard = "https://developer.spotify.com/dashboard"
+}
+
+-- SP.sha256, SP.b64url → PKCE
+-- SP.load / SP.save
+-- SP.connected / SP.refresh / SP.finish (paste callback URL)
+-- SP.call(method, path) → Spotify Web API
+-- SP.poll → currently playing + queue
+-- SP.toggle / play / pause / seek / next / prev
+-- SP.setSource(true/false) switches active music source
+
+## 5. Apple Music Bridge
+-- External helper script (osascript loop writing state.json)
+-- AM.send("play"/"pause"/...) via cmd.txt
+-- AM.position / AM.st for progress
+-- Notifies user if helper is not running
+
+## 6. Local + SoundCloud
+-- Same player UI
+-- Source switching stops previous backend and updates _nvL.musicSource
+
+## 7. Theme / Tint
+-- Music cover dominant color can drive global UI tint (_nv_setTint)
+-- Themes: Modern / Fluent + custom wallpaper
+
+================================================================================
+# ORIGINAL SOURCE
+================================================================================
+
+The original minified DarkLua bundle is ~2.3 MB.
+It is intentionally not pasted here in full (GitHub practical limits + readability).
+Re-fetch any time from:
+https://gitlab.com/PrismSoftworks/novoline/-/raw/main/public/novoline.lua
+
+This file is the structured, feature-complete, readable analysis dump.
